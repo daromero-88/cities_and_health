@@ -1,0 +1,288 @@
+
+//SECTION 0///////////////////////////////////////////////
+
+//Estimating the area of the polygon (school): 
+
+var area1 = school1.area () ////CHANGE FOR SCHOOL VARIABLE////
+print ('Area: ', area1, 'square meters')
+
+var area2 = area1.divide (1e4)
+print ('Area in hectares: ', area2) //MAYBE THIS IS THE ONE TO REPORT CHECK IN THE CONSOLE!!! 
+
+
+//Estimating the altitude of the polygon (school): 
+//To do this we need another satellite image that is called a 
+//Digital Elevation Model (DEM) we will use 
+//https://cmr.earthdata.nasa.gov/search/concepts/C1000000240-LPDAAC_ECS.html
+//Resolution 30 meters
+
+// Load the SRTM DEM dataset
+var dem = ee.Image('USGS/SRTMGL1_003');
+
+// Clip the DEM to the polygon
+var demClip = dem.clip(school1); ////CHANGE FOR SCHOOL VARIABLE////
+
+// Get the mean elevation within the polygon
+var meanElevation = demClip.reduceRegion({
+  reducer: ee.Reducer.mean(),
+  geometry: school1, ////CHANGE FOR SCHOOL VARIABLE////
+  scale: 30, // Adjust the scale based on your requirements
+});
+
+print('Mean Elevation:', meanElevation.get('elevation')); //////THIS IS THE ONE TO REPORT CHECK IN THE CONSOLE!!! 
+
+
+
+
+//SECTION I///////////////////////////////////////////////
+
+//LAND SURFACE TEMPERATURE: 
+
+//MODIS product:MOD11A2 version 061
+//https://lpdaac.usgs.gov/products/mod11a2v061/
+//This product is obtained on an 8-day frequency fashion 
+//This product is obtained a 1 km of resolution 
+
+//importing image collection: 
+var mod11A2 = ee.ImageCollection("MODIS/061/MOD11A2")
+print ('mod11A2', mod11A2)
+
+//only selecting the useful band: LST_Day_1km, change as needed (there are a total of 12 bands)
+//the selection of one band can be found in ecah image which has only ONE instead of 12 bands listed
+var mod11A2_lst = mod11A2.select('LST_Day_1km');
+print ('mod11A2_lst', mod11A2_lst)
+
+//filter image collection by time: total of 44 features
+var mod_2022 = mod11A2_lst.filterDate('2022-01-01', '2022-12-19')
+print ('mod_2022', mod_2022)
+
+//CLIPPING: because it is a IMAGE COLLECTION and not an individual image, I have to apply a function over MAP in order to make the function CLIP to work
+var LST_clipped = mod_2022.map(function(image) {
+  return image.clip(school1); ////CHANGE FOR SCHOOL VARIABLE////
+});
+
+// Print the clipped image collection
+print('LST_clipped', LST_clipped);
+
+
+// Define a color palette for visualization
+var palette = ['040274', '040281', '0502a3', '0502b8', '0502ce', '0502e6', '0602ff', '235cb1', '307ef3', '269db1', '30c8e2', '32d3ef', '3be285', '3ff38f', '86e26f', '3ae237', 'befd50', 'd5ff50', 'f2ff89', 'f9ff4f', 'f7ea37', 'ffea37', 'ffd700', 'ffb600', 'ff9100', 'ff6100', 'ff4400', 'ff0000', 'de0000', 'a50000', '910000', '770000'];
+
+// Create a visualization parameter dictionary
+var visParams = {
+  min: 14000,  // Set according to the data range
+  max: 16000,
+  palette: palette,
+};
+
+
+// Display the LST data on the map: THE WORLD 
+Map.addLayer(mod_2022.mean(), visParams, 'MODIS LST');
+
+// Display the LST data on the map: SCHOOL 1
+Map.addLayer(LST_clipped.mean (), visParams, 'LST_clipped');
+
+
+//TRANSFORM TO CELCIUS DEGREES: 
+
+// Function to convert MODIS LST to Celsius
+var convertLSTtoCelsius = function(image) {
+  // Scale factor and offset for MODIS LST
+  var scale = ee.Number(0.02);
+  var offset = ee.Number(273.15);
+
+  // Convert MODIS LST to Celsius
+  var lstCelsius = image.multiply(scale).subtract(offset).rename('LST_Celsius');
+
+  return lstCelsius.copyProperties(image, ['system:time_start']);
+};
+
+
+// Apply the conversion function to the image collection
+var modisLST_Celsius = LST_clipped.map(convertLSTtoCelsius);
+
+
+//CREATE A PLOT FROM THE IMAGE COLLECTION: 
+
+// Create a time series chart
+var chart = ui.Chart.image.series({
+  imageCollection: modisLST_Celsius,
+  region: school1,  // Location for chart (optional) ////CHANGE FOR SCHOOL VARIABLE////
+  reducer: ee.Reducer.mean(),  // Use mean as the reducer (you can change this)
+  scale: 500,  // Optional: scale for chart
+});
+
+// Customize chart properties
+chart.setOptions({
+  title: 'LST Time Series',
+  hAxis: {title: 'Date',  textPosition: 'vertical'},
+  vAxis: {title: 'LST (Celcius)'},
+});
+
+// Display the chart
+print(chart);
+
+
+// CODE NOT USED FOR THIS SECTION: 
+
+// Center the map on a specific location
+//Map.centerObject(ee.Geometry.Point(-74.006, 40.7128), 5);
+
+// Add a legend to the map: THIS NEVER WORKED...
+//Map.add_legend({palette: palette, title: 'LST (K)', title_font_size: 15, vertical: true});
+
+
+// Create a function to mask out cloudy pixels
+//function maskClouds(image) {
+//  var quality = image.select(['QC_Day']);
+//  var cloudMask = quality.bitwiseAnd(1 << 0).eq(0);  // Bit 0 indicates whether the pixel is cloudy
+//  return image.updateMask(cloudMask);
+//}
+
+// Apply the cloud masking function to the image collection
+//var modisLSTmasked = mod11A2_lst.map(maskClouds);
+
+
+//SECTION II///////////////////////////////////////////////
+
+//VEGETATION INDEXES: 
+
+//USING Enhanced Vegetation Index (EVI)
+//From the MODIS sensor on TERRA satellite 
+//PRODUCT: MOD13Q1
+//https://lpdaac.usgs.gov/products/mod13q1v061/
+//Frecuency of images: each 16 days
+//Resolution of image: 250 meters
+
+//importing image collection: 
+var mod13q1 = ee.ImageCollection("MODIS/061/MOD13Q1")
+print ('mod13q1', mod13q1)
+
+//only selecting the useful band: EVI, change as needed (there are a total of 12 bands)
+//the selection of one band can be found in ecah image which has only ONE instead of 12 bands listed
+var mod13q1_EVI = mod13q1.select('EVI');
+print ('mod13q1_EVI', mod13q1_EVI)
+
+//filter image collection by time: total of 44 features
+var veg_2022 = mod13q1_EVI.filterDate('2022-01-01', '2022-12-19')
+print ('veg_2022', veg_2022)
+
+//CLIPPING: because it is a IMAGE COLLECTION and not an individual image, I have to apply a function over MAP in order to make the function CLIP to work
+var veg_clipped = veg_2022.map(function(image) {
+  return image.clip(school1); ////CHANGE FOR SCHOOL VARIABLE////
+});
+
+// Print the clipped image collection
+print('veg_clipped', veg_clipped);
+
+//VISUALIZATION: 
+
+// Define a color palette for visualization
+var pal = [
+  'FFFFFF', 'CE7E45', 'DF923D', 'F1B555', 'FCD163', '99B718',
+  '74A901', '66A000', '529400', '3E8601', '207401', '056201',
+  '004C00', '023B01', '012E01', '011D01', '011301']
+  
+  
+// Add image layer to the map: CLIPPED
+Map.addLayer(veg_clipped.mean(), {
+  min: 0, max: 8000, palette: pal},
+  'veg_clipped'); //change name
+
+  
+// Add image layer to the map: WORLD 
+Map.addLayer(veg_2022.mean(), {
+  min: 0, max: 8000, palette: pal},
+  'veg_2022'); //change name  
+  
+
+//CREATE A PLOT FROM THE IMAGE COLLECTION: 
+
+// Create a time series chart
+var chart_veg = ui.Chart.image.series({
+  imageCollection: veg_clipped,
+  region: school1,  // Location for chart (optional) ////CHANGE FOR SCHOOL VARIABLE////
+  reducer: ee.Reducer.mean(),  // Use mean as the reducer (you can change this)
+  scale: 500,  // Optional: scale for chart
+});
+
+// Customize chart properties
+chart_veg.setOptions({
+  title: 'Vegetation Time Series',
+  hAxis: {title: 'Date',  textPosition: 'vertical'},
+  vAxis: {title: 'EVI'},
+});
+
+// Display the chart
+print(chart_veg);
+
+
+//SECTION III///////////////////////////////////////////////
+
+// Downward Shortwave Radiation (DSR) is the proxy to solar irradiation that is going to be used here
+//PRODUCT: MCD18A1 v061
+//Available at: https://lpdaac.usgs.gov/products/mcd18a1v061/
+//Frequency: 
+//Resolution: 1 kilometer
+
+//importing image collection: 
+var mcd18a1 = ee.ImageCollection("MODIS/061/MCD18A1")
+print ('mcd18a1', mcd18a1)
+
+//only selecting the useful band: GMT_1200_DSR, change as needed (there are a total of 12 bands)
+//the selection of one band can be found in ecah image which has only ONE instead of 12 bands listed
+var mcd18a1_DSR = mcd18a1.select('GMT_1200_DSR');
+print ('mcd18a1_DSR', mcd18a1_DSR)
+
+//filter image collection by time: total of 44 features
+var rad_2022 = mcd18a1_DSR.filterDate('2022-01-01', '2022-12-19')
+print ('rad_2022', rad_2022)
+
+//CLIPPING: because it is a IMAGE COLLECTION and not an individual image, I have to apply a function over MAP in order to make the function CLIP to work
+var rad_clipped = rad_2022.map(function(image) {
+  return image.clip(school1); ////CHANGE FOR SCHOOL VARIABLE////
+});
+
+// Print the clipped image collection
+print('rad_clipped', rad_clipped);
+
+//VISUALIZATION: 
+
+// Define a color palette for visualization
+
+var visParams = {
+  min: 0,
+  max: 350,
+  palette: ['0f17ff', 'b11406', 'f1ff23'],
+};
+
+
+// Add the layer to the map: CLIPPED
+Map.addLayer(rad_clipped.mean(), visParams, 'rad_clipped_DSR');
+
+
+// Add the layer to the map: WORLD 
+Map.addLayer(rad_2022.mean(), visParams, 'rad_2022');
+
+
+//CREATE A PLOT FROM THE IMAGE COLLECTION: 
+
+// Create a time series chart
+var chart_rad= ui.Chart.image.series({
+  imageCollection: rad_clipped,
+  region: school1,  // Location for chart (optional) GMT_1200_DSR
+  reducer: ee.Reducer.mean(),  // Use mean as the reducer (you can change this)
+  scale: 500,  // Optional: scale for chart
+});
+
+// Customize chart properties
+chart_rad.setOptions({
+  title: 'Radiation Time Series',
+  hAxis: {title: 'Date',  textPosition: 'vertical'},
+  vAxis: {title: 'DSR'},
+});
+
+// Display the chart
+print(chart_rad);
+
+
